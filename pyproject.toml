@@ -10,6 +10,8 @@ authors = [{name = "Runa Gridweaver"}, {name = "Volmarr Viking"}]
 dependencies = []
 
 [project.optional-dependencies]
+huginn = ["huginn"]
+muninn = ["muninn"]
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [build-system]

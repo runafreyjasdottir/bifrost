@@ -519,6 +519,10 @@ class BifrostBridge:
         if self._mimir_conn:
             self._mimir_conn.close()
             self._mimir_conn = None
+        if self._huginn:
+            if hasattr(self._huginn, 'close'):
+                self._huginn.close()
+            self._huginn = None
         if self._muninn:
             self._muninn.close()
             self._muninn = None
