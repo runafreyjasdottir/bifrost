@@ -25,7 +25,7 @@ class BifrostConfig:
     and the realms beyond (associative) into a single bridge.
     """
     # ─── Backend Paths ─────────────────────────────────────────────────
-    mimir_db_path: str = "~/.hermes/memory/runa_memory.py"
+    mimir_db_path: str = "~/.hermes/memory/runa_memory.db"
     muninn_db_path: str = "~/.hermes/memory/muninn_hebbian.db"
     
     # ─── Qdrant Settings ───────────────────────────────────────────────
