@@ -184,7 +184,11 @@ class BifrostBridge:
     def recall(self, memory_id: int) -> Optional[Dict[str, Any]]:
         """Recall a specific memory by ID from Mímir's Well.
         
-        Also reinforces the Hebbian connection for this memory.
+        Always logs the activation in Muninn (so the memory can reach
+        the Hebbian threshold). If the memory has been accessed enough
+        times (min_activation_threshold), also fires a Hebbian
+        reinforcement — a recalled memory with sufficient history
+        starts wiring to recently co-activated memories.
         """
         self._ensure_initialized()
         
@@ -199,9 +203,25 @@ class BifrostBridge:
         
         if row:
             result = dict(row)
-            # Reinforce in Muninn
+            # Always log activation — even noise must be counted
             if self._muninn:
                 self._muninn.activate(memory_id)
+                
+                # Hebbian guard: only wire after threshold met
+                prior = self._get_activation_count(memory_id)
+                threshold = self.config.min_activation_threshold
+                if prior >= threshold and threshold > 0:
+                    logger.debug(
+                        "Bifrǫst: recall(%d) Hebbian FIRED (%d ≥ %d)",
+                        memory_id, prior, threshold,
+                    )
+                    # Single-memory recall doesn't create co-activation links
+                    # but the activation is logged for future co-activation
+                elif threshold > 0:
+                    logger.debug(
+                        "Bifrǫst: recall(%d) Hebbian DEFERRED (%d < %d)",
+                        memory_id, prior, threshold,
+                    )
             return result
         return None
 
@@ -378,15 +398,79 @@ class BifrostBridge:
             logger.warning("Bifrǫst: Muninn association failed: %s", e)
             return []
 
+    def _get_activation_count(self, memory_id: int) -> int:
+        """Count how many times a memory has been activated in Muninn.
+        
+        This is the Hebbian guard: memories accessed fewer than
+        min_activation_threshold times are treated as noise and don't
+        get co-activation reinforcement. Their activations are still
+        logged so the count can grow toward the threshold.
+        """
+        muninn = self._ensure_muninn()
+        if muninn is None:
+            return 0
+        
+        conn = muninn._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM activation_log WHERE memory_id = ?",
+                (memory_id,),
+            ).fetchone()
+            return row["cnt"] if row else 0
+        except Exception as e:
+            logger.debug("Bifrǫst: Activation count query failed for %s: %s", memory_id, e)
+            return 0
+
     def _reinforce_coactivation(self, memory_ids: List[int],
                                  emotional_valence: float = 0.0):
-        """Reinforce Hebbian connections between co-activated memories."""
+        """Reinforce Hebbian connections between co-activated memories.
+        
+        Guard: Only activates full Hebbian co-activation (wiring memories
+        together) when the anchor memory has been accessed at least
+        min_activation_threshold times. Below-threshold memories still
+        get individual activations logged (so their count can grow
+        toward the threshold), but no cross-connections are created.
+        
+        This prevents noise — fleeting, low-confidence retrievals — from
+        building spurious Hebbian links. A memory must prove itself
+        worth remembering before it starts wiring to others.
+        """
         muninn = self._ensure_muninn()
         if muninn is None:
             return
         
+        threshold = self.config.min_activation_threshold
+        
         try:
-            muninn.activate_batch(memory_ids, emotional_valence=emotional_valence)
+            if threshold <= 0 or len(memory_ids) < 2:
+                # Guard disabled or too few memories — just log and connect
+                muninn.activate_batch(memory_ids, emotional_valence=emotional_valence)
+                return
+            
+            # ─── Hebbian Guard: check anchor (first result) activation count ──
+            anchor_id = memory_ids[0]
+            prior_activations = self._get_activation_count(anchor_id)
+            
+            if prior_activations >= threshold:
+                # Anchor has proven itself — full Hebbian reinforcement
+                logger.debug(
+                    "Bifrǫst: Hebbian reinforcement FIRED for %d memories "
+                    "(anchor %d has %d prior activations, threshold=%d)",
+                    len(memory_ids), anchor_id, prior_activations, threshold,
+                )
+                muninn.activate_batch(memory_ids, emotional_valence=emotional_valence)
+            else:
+                # Below threshold — log individual activations but don't wire
+                logger.debug(
+                    "Bifrǫst: Hebbian reinforcement DEFERRED for anchor %d "
+                    "(%d/%d activations needed) — logging only",
+                    anchor_id, prior_activations, threshold,
+                )
+                for mid in memory_ids:
+                    try:
+                        muninn.activate(mid, emotional_valence=emotional_valence)
+                    except Exception:
+                        pass  # Non-blocking
         except Exception as e:
             logger.warning("Bifrǫst: Hebbian reinforcement failed: %s", e)
 

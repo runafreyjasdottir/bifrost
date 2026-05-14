@@ -46,6 +46,12 @@ class BifrostConfig:
     auto_consolidate: bool = True
     consolidation_threshold: float = 0.8
     
+    # ─── Hebbian Guard ─────────────────────────────────────────────────
+    # Only reinforce co-activation connections when the anchor (source)
+    # memory has been accessed enough times. Prevents noise from creating
+    # spurious Hebbian links. Set to 0 to disable the guard.
+    min_activation_threshold: int = 3  # ≥3 accesses before Hebbian fires
+
     # ─── Decay ─────────────────────────────────────────────────────────
     auto_decay: bool = True
     decay_interval_hours: float = 24.0
